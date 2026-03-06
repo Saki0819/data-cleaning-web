@@ -57,26 +57,30 @@ def _load_merchant_map():
 
 
 def scan_files(input_path, merchant_ids):
-    """扫描目录，找含"现金"的子目录中匹配商户ID+基本账户的CSV文件。
+    """扫描目录，找含"现金"或"微信"的子目录中匹配商户ID+基本账户的CSV文件。
     返回 list of (file_path, merchant_id)"""
     input_path = input_path.strip().strip('"').strip("'").rstrip('\\').rstrip('/')
     if not os.path.isdir(input_path):
         print(f"路径不存在: {input_path}")
         return []
 
-    # 确定搜索目录：目录名含"现金"→直接搜索；否则搜子目录
+    # 目录名关键词
+    DIR_KEYWORDS = ("现金", "微信")
+
+    # 确定搜索目录：目录名含关键词→直接搜索；否则搜子目录
     search_dirs = []
-    if "现金" in os.path.basename(input_path):
+    if any(kw in os.path.basename(input_path) for kw in DIR_KEYWORDS):
         search_dirs.append(input_path)
     else:
         for name in os.listdir(input_path):
             sub = os.path.join(input_path, name)
-            if os.path.isdir(sub) and "现金" in name:
+            if os.path.isdir(sub) and any(kw in name for kw in DIR_KEYWORDS):
                 search_dirs.append(sub)
 
+    # 兜底：没找到匹配子目录时，尝试直接搜索当前目录
     if not search_dirs:
-        print(f"未找到含'现金'的目录: {input_path}")
-        return []
+        search_dirs.append(input_path)
+        print(f"未找到含{DIR_KEYWORDS}的子目录，尝试搜索当前目录: {input_path}")
 
     results = []
     for d in search_dirs:
