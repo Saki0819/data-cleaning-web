@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.last_path.json
+output/
+*.tmp
+.DS_Store
