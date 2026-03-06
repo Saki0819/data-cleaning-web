@@ -33,9 +33,8 @@ BIZ_TYPE_MAP = {
 # 提现类业务类型
 WITHDRAW_TYPES = {"提现", "网银充值"}
 
-# 输出列顺序
-WITHDRAW_COLUMNS = ["月份", "店铺", "日期", "明细", "IP", "渠道", "账号名称", "日收入", "日支出"]
-NON_WITHDRAW_COLUMNS = ["月份", "日期", "明细", "IP", "渠道", "账号名称", "日收入", "日支出"]
+# 输出列顺序（统一）
+OUTPUT_COLUMNS = ["月份", "店铺", "日期", "明细", "IP", "渠道", "账号名称", "日收入", "日支出"]
 
 
 def _load_merchant_map():
@@ -67,15 +66,14 @@ def scan_files(input_path, merchant_ids):
     # 目录名关键词
     DIR_KEYWORDS = ("现金", "微信")
 
-    # 确定搜索目录：目录名含关键词→直接搜索；否则搜子目录
+    # 搜索当前目录 + 所有含关键词的子目录
     search_dirs = []
     if any(kw in os.path.basename(input_path) for kw in DIR_KEYWORDS):
         search_dirs.append(input_path)
-    else:
-        for name in os.listdir(input_path):
-            sub = os.path.join(input_path, name)
-            if os.path.isdir(sub) and any(kw in name for kw in DIR_KEYWORDS):
-                search_dirs.append(sub)
+    for name in os.listdir(input_path):
+        sub = os.path.join(input_path, name)
+        if os.path.isdir(sub) and any(kw in name for kw in DIR_KEYWORDS):
+            search_dirs.append(sub)
 
     # 兜底：没找到匹配子目录时，尝试直接搜索当前目录
     if not search_dirs:
@@ -86,8 +84,6 @@ def scan_files(input_path, merchant_ids):
     for d in search_dirs:
         for fname in sorted(os.listdir(d)):
             if not fname.lower().endswith('.csv'):
-                continue
-            if "基本账户" not in fname:
                 continue
             for mid in merchant_ids:
                 if mid in fname:
@@ -264,42 +260,37 @@ def main(input_paths):
 
     # 存档合并：加载已有数据，按批次月份去重后合并
     existing = read_output_sheets(output_path)
-    old_withdraw = existing.get('提现汇总', [])
-    old_non_withdraw = existing.get('不含提现汇总', [])
+    old_data = existing.get('资金汇总', [])
+    # 兼容旧格式：如果旧文件有分开的sheet
+    if not old_data:
+        old_data = existing.get('提现汇总', []) + existing.get('不含提现汇总', [])
 
     # 旧数据修正（xlsx读回None/int→''/float）
-    for rows in (old_withdraw, old_non_withdraw):
-        for r in rows:
-            for k in r:
-                if r[k] is None:
-                    r[k] = ''
-            r['日收入'] = float(r['日收入'] or 0)
-            r['日支出'] = float(r['日支出'] or 0)
+    for r in old_data:
+        for k in r:
+            if r[k] is None:
+                r[k] = ''
+        r['日收入'] = float(r['日收入'] or 0)
+        r['日支出'] = float(r['日支出'] or 0)
 
-    if batch_months and (old_withdraw or old_non_withdraw):
-        old_w_count, old_nw_count = len(old_withdraw), len(old_non_withdraw)
-        old_withdraw = [r for r in old_withdraw if r.get('月份', '') not in batch_months]
-        old_non_withdraw = [r for r in old_non_withdraw if r.get('月份', '') not in batch_months]
-        print(f'  存档: 旧提现{old_w_count}→{len(old_withdraw)}行, 旧非提现{old_nw_count}→{len(old_non_withdraw)}行')
+    if batch_months and old_data:
+        old_count = len(old_data)
+        old_data = [r for r in old_data if r.get('月份', '') not in batch_months]
+        print(f'  存档: 旧数据{old_count}→{len(old_data)}行(去除批次月份)')
 
-    # 合并 旧(去重后) + 新
-    all_withdraw = old_withdraw + _reorder(withdraw_agg, WITHDRAW_COLUMNS)
-    all_non_withdraw = old_non_withdraw + _reorder(non_withdraw_agg, NON_WITHDRAW_COLUMNS)
-    all_withdraw.sort(key=lambda x: (str(x.get('月份', '')), str(x.get('店铺', '')), str(x.get('日期', ''))))
-    all_non_withdraw.sort(key=lambda x: (str(x.get('月份', '')), str(x.get('账号名称', '')), str(x.get('明细', ''))))
+    # 合并 旧(去重后) + 新（提现+非提现合并为一个sheet）
+    new_data = _reorder(withdraw_agg, OUTPUT_COLUMNS) + _reorder(non_withdraw_agg, OUTPUT_COLUMNS)
+    all_data = old_data + new_data
+    all_data.sort(key=lambda x: (str(x.get('月份', '')), str(x.get('店铺', '')), str(x.get('日期', ''))))
 
     sheets = {
-        '提现汇总': all_withdraw,
-        '不含提现汇总': all_non_withdraw,
+        '资金汇总': all_data,
     }
     write_output(sheets, output_path)
 
     # 统计（全量）
-    w_inc = sum(float(r.get('日收入') or 0) for r in all_withdraw)
-    w_exp = sum(float(r.get('日支出') or 0) for r in all_withdraw)
-    nw_inc = sum(float(r.get('日收入') or 0) for r in all_non_withdraw)
-    nw_exp = sum(float(r.get('日支出') or 0) for r in all_non_withdraw)
+    total_inc = sum(float(r.get('日收入') or 0) for r in all_data)
+    total_exp = sum(float(r.get('日支出') or 0) for r in all_data)
     print(f'\n处理完成!')
-    print(f'  提现汇总(全量): {len(all_withdraw)}行, 收入={w_inc:.2f}, 支出={w_exp:.2f}')
-    print(f'  非提现汇总(全量): {len(all_non_withdraw)}行, 收入={nw_inc:.2f}, 支出={nw_exp:.2f}')
+    print(f'  资金汇总(全量): {len(all_data)}行, 收入={total_inc:.2f}, 支出={total_exp:.2f}')
     print(f'  输出: {output_path}')

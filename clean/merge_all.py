@@ -55,17 +55,19 @@ def _build_fund_summary(wechat_file, alipay_file, bill_file, qiwei_file, bank_fi
         return {'日期': date or '', '明细': detail or '', 'IP': ip or '', '渠道': channel or '', '店铺': store or '',
                 '摘要': summary or '', '收(付)方名称': payee or '', '收入': income or 0, '支出': expense or 0}
 
-    # 微信：提现汇总 + 不含提现汇总
+    # 微信：资金汇总（兼容旧格式提现汇总+不含提现汇总）
     if os.path.exists(wechat_file):
-        for sheet_name in ['提现汇总', '不含提现汇总']:
-            data = _read_sheet(wechat_file, sheet_name)
-            for r in data:
-                fund_rows.append(_fund_row(
-                    r.get('日期', ''), r.get('明细', ''), r.get('IP', ''),
-                    r.get('渠道', ''), r.get('店铺', r.get('账号名称', '')),
-                    r.get('日收入', 0), r.get('日支出', 0)))
-            if data:
-                print(f'  微信_{sheet_name}: {len(data)}行')
+        data = _read_sheet(wechat_file, '资金汇总')
+        if not data:
+            for sheet_name in ['提现汇总', '不含提现汇总']:
+                data.extend(_read_sheet(wechat_file, sheet_name))
+        for r in data:
+            fund_rows.append(_fund_row(
+                r.get('日期', ''), r.get('明细', ''), r.get('IP', ''),
+                r.get('渠道', ''), r.get('店铺', r.get('账号名称', '')),
+                r.get('日收入', 0), r.get('日支出', 0)))
+        if data:
+            print(f'  微信_资金汇总: {len(data)}行')
 
     # 支付宝资金汇总
     if os.path.exists(alipay_file):

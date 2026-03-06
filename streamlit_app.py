@@ -67,7 +67,7 @@ _module_lock = threading.Lock()
 
 
 def _extract_uploads(uploaded_files, input_dir):
-    """保存上传文件到临时目录，自动解压ZIP"""
+    """保存上传文件到临时目录，自动解压ZIP（处理GBK编码的中文文件名）"""
     for f in uploaded_files:
         filepath = os.path.join(input_dir, f.name)
         with open(filepath, 'wb') as out:
@@ -75,7 +75,22 @@ def _extract_uploads(uploaded_files, input_dir):
         if f.name.lower().endswith('.zip'):
             try:
                 with zipfile.ZipFile(filepath, 'r') as zf:
-                    zf.extractall(input_dir)
+                    for info in zf.infolist():
+                        # 修复GBK编码的中文文件名
+                        try:
+                            fixed_name = info.filename.encode('cp437').decode('gbk')
+                        except (UnicodeDecodeError, UnicodeEncodeError):
+                            fixed_name = info.filename
+                        # 跳过目录项中的 __MACOSX 等垃圾
+                        if fixed_name.startswith('__'):
+                            continue
+                        target = os.path.join(input_dir, fixed_name)
+                        if info.is_dir():
+                            os.makedirs(target, exist_ok=True)
+                        else:
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            with zf.open(info) as src, open(target, 'wb') as dst:
+                                dst.write(src.read())
             except zipfile.BadZipFile:
                 st.warning(f"无法解压: {f.name}，已跳过")
 
